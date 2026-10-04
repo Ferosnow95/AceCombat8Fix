@@ -1,26 +1,17 @@
 # Changelog
 
-Only **v0.8** and **v0.11** are published as releases. The other versions were internal test builds; they're listed because each one taught something about how AC8 handles its cameras.
+**v0.8 is the latest release** and the only supported version. It fixes cutscenes and menus only; it has no FOV option. The other versions were internal test builds; they're listed because each one taught something about how AC8 handles its cameras.
 
-## v0.11 — 2026-10-04 (pre-release)
-**Cutscene/menu fix plus adjustable flight FOV.**
-- **New:** per-view flight FOV for third-person, cockpit and HUD-only (`ThirdPersonFOVOffset`, `CockpitFOVOffset`, `FirstPersonFOVOffset`, default +10° each).
-- **New:** PageUp/PageDown tune the FOV of the view you're in, and Home resets it. Values are saved to `AC8CutsceneUW_fov.txt` and loaded on the next launch.
-- **New:** the aspect cap is also lifted on gameplay cameras (`LiveCameraComponent`) and debriefing cameras (`LiveDebriefingCameraComponent`).
-- **Changed:** FOV is now applied to the plane's blueprint **templates** only, once each, starting from their original value. AC8 copies the FOV when the plane spawns and ignores later changes, so this is the only place it sticks.
-- **Fixed:** the v0.10 test build applied the FOV twice (template, then the camera copied from it), so cockpit and HUD-only got +20 instead of +10.
-- **Fixed:** an `AspectRatioMax` of `0` (meaning "no cap") on gameplay cameras was being turned into a cap. It's now left alone.
-- **Changed:** one fresh camera pass per burst of level/player restarts, instead of one per restart (a loading-screen hitch of up to ~40 ms became a single pass of ~5–20 ms).
-- **Changed:** `Diagnostics` (view and camera logging) is off by default.
-- Note: the FOV feature hasn't yet been confirmed in-game on the final build, which is why this is a pre-release. The cutscene fix is unchanged from v0.8.
+## FOV experiments (v0.9 – v0.13) — not working, not released
+None of these fixed the flight FOV in game, and none is part of the release. The cutscene fix is unchanged from v0.8.
 
-## v0.10 — internal
-- First FOV build. It set `FieldOfView` on the live cameras, which had no effect on the picture, and the FOV was also applied twice. Both fixed in v0.11.
+- **v0.13** — Wrote the offset to each plane camera the moment it is created, and left the blueprint templates alone. Reported in game as not changing the FOV.
+- **v0.12** — Test build with live-FOV probes. `PlayerCameraManager.LockedFOV` is not exposed in this build, and adding FOV through the afterburner channel (`ABMaxAdditionFOV`, `AfterburnerFOVCurrent`) changed nothing. It also showed that v0.11 read the third-person template while the game was still loading it and recorded the wrong original value (90° instead of 61.9°), so third-person never received the offset.
+- **v0.11** — Changed the plane's blueprint templates once each, with PageUp/PageDown tuning keys. Cockpit and HUD-only picked up the offset at spawn; third-person did not (see v0.12). It was published as a pre-release and is superseded: it does not deliver a working FOV option.
+- **v0.10** — Wrote `FieldOfView` on the live cameras. No effect on the picture, and the offset was applied twice (template, then the camera copied from it).
+- **v0.9** — Added FOV discovery. It found the flight camera classes on the player plane and showed that AC8's gameplay is already Hor+ (61.9° at 16:9 becomes about 100° on 32:9). Also found `LiveDebriefingCameraComponent`.
 
-## v0.9 — internal
-- Added FOV discovery. It found the three flight camera classes on the player plane and showed that AC8's gameplay is already Hor+ (61.9° at 16:9 becomes ~100° on 32:9).
-- Merged the camera passes after each level/player restart into one.
-- Found `LiveDebriefingCameraComponent`.
+What this showed: AC8 reads a flight camera's FOV once, when the camera starts up, and ignores later writes to the live camera. A reliable way to change it has not been found.
 
 ## v0.8 — 2026-10-04 (release)
 **Stable cutscene/menu fix.**
