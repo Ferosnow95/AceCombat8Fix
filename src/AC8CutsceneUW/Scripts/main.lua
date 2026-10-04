@@ -1,5 +1,5 @@
 --[[
-    AC8 Cutscene Ultrawide  v0.8  (UE4SS Lua, ACE COMBAT 8 / UE 5.4)
+    AC8 Ultrawide & FOV  v0.15  (UE4SS Lua, ACE COMBAT 8 / UE 5.4)
 
     What it does
     ------------
@@ -12,14 +12,26 @@
 
     Stability rules (learned the hard way in v0.4-v0.7)
     --------------------------------------------------
-      * Never keep UObject references between frames. Objects die on level transitions, and even
+      * (Cutscene part) Never keep UObject references between frames. Objects die on level transitions, and even
         calling IsValid() on a dead one crashes inside UE4SS. Cameras are patched the moment they're
         created (NotifyOnNewObject) or found fresh with FindAllOf, then forgotten.
       * No per-tick loop. Nothing runs during gameplay except when a camera is created.
       * Never read the camera manager's view-target actor, and never read hooked function parameters
         other than the context object (both crashed this UE4SS build).
 
-    Keys: F8 = toggle (restores the original cap), F7 = diagnostic snapshot to the log.
+    Flight FOV (v0.15)
+    ------------------
+    AC8 ignores writes to the plane's camera components (it caches their FOV at spawn), but the engine's
+    PlayerController:FOV(deg) command locks the FINAL view FOV in PlayerCameraManager, and that wins at any
+    time - so it works live, no respawn needed. Which flight view is active (third-person / cockpit /
+    HUD-only) is read from AC8's LiveCameraViewComponent. The technique comes from the AC8CockpitFOV mod
+    (AC8 Three-View FOV), which proved it in this game; this module is an independent implementation.
+    A locked FOV replaces the game's dynamic FOV in that view (value 0 gives it back). Offline only: the FOV
+    lock is skipped when the world has a net driver (online).
+    Unlike the cutscene part, this part keeps object references between frames (purged every frame), which is
+    the pattern the AC8CockpitFOV mod runs with in this game on this UE4SS build.
+
+    Keys: F8 = toggle, F7 = snapshot, PageUp/PageDown = flight FOV of the current view, Home = reset it.
 ]]
 
 local cfg = require("config")
@@ -30,6 +42,7 @@ local UEHelpers = require("UEHelpers")
 ------------------------------------------------------------------------
 local TAG = "[AC8CutsceneUW] "
 local logFile, logPath = nil, nil
+local modDir = nil
 do
     local src = debug and debug.getinfo and debug.getinfo(1, "S").source or ""
     src = src:gsub("^@", "")
@@ -46,7 +59,7 @@ do
             local old = io.open(path, "r")
             if old then old:close(); os.remove(prev); os.rename(path, prev) end
             local f = io.open(path, "w")
-            if f then logFile, logPath = f, path; break end
+            if f then logFile, logPath, modDir = f, path, d; break end
         end
     end
 end
@@ -201,6 +214,176 @@ local function snapshot(why)
     log("==================================================")
 end
 
+
+------------------------------------------------------------------------
+-- Flight FOV: PlayerController:FOV(deg) per view (see header)
+------------------------------------------------------------------------
+local FOV_MODES = { "ThirdPerson", "Cockpit", "FirstPerson" }
+local FOV_BASE  = { ThirdPerson = 61.9, Cockpit = 73.7, FirstPerson = 73.7 }   -- the game's own 16:9 values
+local fovValue = {
+    ThirdPerson = cfg.ThirdPersonFOV or 0,    -- 16:9-equivalent degrees; 0 = the game's own FOV
+    Cockpit     = cfg.CockpitFOV or 0,
+    FirstPerson = cfg.FirstPersonFOV or 0,
+}
+local fovEnabled = cfg.FlightFOV ~= false
+local fovMode = nil            -- current view name (plain string), maintained by the frame loop
+local fovFailed = false
+
+local function onScreen(fov16)   -- 16:9-equivalent horizontal FOV -> the same view on this screen (Hor+)
+    if not screenAR then return fov16 end
+    return math.deg(2 * math.atan(math.tan(math.rad(fov16) / 2) * screenAR / (16 / 9)))
+end
+
+local function savedFovPath() return (modDir or "") .. "AC8CutsceneUW_flightfov.txt" end
+local function loadSavedFov()
+    local f = io.open(savedFovPath(), "r")
+    if not f then return end
+    for line in f:lines() do
+        local k, v = line:match("^%s*(%w+)%s*=%s*(-?[%d%.]+)")
+        if k and fovValue[k] ~= nil then fovValue[k] = tonumber(v) end
+    end
+    f:close()
+    log("Loaded saved flight FOV from %s: third-person %g, cockpit %g, HUD-only %g (0 = game default)",
+        savedFovPath(), fovValue.ThirdPerson, fovValue.Cockpit, fovValue.FirstPerson)
+end
+local function saveFov()
+    local f = io.open(savedFovPath(), "w")
+    if not f then return end
+    f:write("-- Saved by AC8CutsceneUW (PageUp/PageDown in game). 16:9-equivalent degrees per view; 0 = game default.\n")
+    for _, k in ipairs(FOV_MODES) do f:write(string.format("%s=%g\n", k, fovValue[k])) end
+    f:close()
+end
+
+local fovViews, fovManagers = {}, {}     -- live objects; touched only from the game-thread frame loop below
+local function remember(list, object)
+    if not object:IsValid() then return end
+    for _, entry in ipairs(list) do
+        if entry.object == object then return end
+    end
+    list[#list + 1] = { object = object }
+end
+
+local function camActive(cam)
+    return cam:IsValid() and cam.bIsActive == true
+end
+
+-- which flight view does this player's current view target belong to? nil = cutscene / menu / online
+local function currentMode(manager)
+    local world, controller = manager:GetWorld(), manager.PCOwner
+    if not world:IsValid() or world.NetDriver:IsValid() or not controller:IsValid() then return nil end
+    local target = controller:GetViewTarget()
+    for _, entry in ipairs(fovViews) do
+        local view = entry.object
+        if view:IsValid() and view:GetOwner() == target then
+            if camActive(view.CachedCockpitCamera) then return "Cockpit" end
+            if camActive(view.CachedFirstPersonCamera) then return "FirstPerson" end
+            if camActive(view.CachedThirdPersonCamera) then return "ThirdPerson" end
+        end
+    end
+    return nil
+end
+
+local function fovFrame()
+    for _, list in ipairs({ fovViews, fovManagers }) do
+        for i = #list, 1, -1 do
+            if not list[i].object:IsValid() then table.remove(list, i) end
+        end
+    end
+    for _, entry in ipairs(fovManagers) do
+        local manager = entry.object
+        if manager.PCOwner:IsValid() then
+            local mode = currentMode(manager)
+            local want16 = (enabled and fovEnabled and mode) and fovValue[mode] or 0
+            local desired = (want16 > 0 and screenAR) and onScreen(want16) or 0
+            local need = false
+            if desired > 0 then
+                need = entry.applied == nil or math.abs(desired - entry.applied) > 0.001
+                    or math.abs(manager:GetFOVAngle() - desired) > 0.05          -- the game replaced the lock
+            elseif entry.applied ~= nil and entry.applied > 0 then
+                need = true                                                       -- hand the FOV back to the game
+            end
+            if need then manager.PCOwner:FOV(desired) end
+            if entry.mode ~= mode or entry.applied ~= desired then
+                if desired > 0 then
+                    log("FOV  view %-11s locked to %.1f wide on screen (%.1f in 16:9 terms)", mode or "-", desired, want16)
+                else
+                    log("FOV  view %-11s game default", mode or "other")
+                end
+            end
+            entry.mode, entry.applied = mode, desired
+            fovMode = mode
+        end
+    end
+end
+
+-- Another mod that calls PlayerController:FOV every frame (AC8CockpitFOV) would fight this one, so step aside
+-- when it is enabled (its Mods\\AC8CockpitFOV\\enabled.txt exists next to this mod's folder).
+local function otherFovModEnabled()
+    if cfg.IgnoreOtherFOVMod == true or not modDir then return false end
+    local sep = modDir:find("\\", 1, true) and "\\" or "/"
+    local f = io.open(modDir .. ".." .. sep .. "AC8CockpitFOV" .. sep .. "enabled.txt", "r")
+    if f then f:close(); return true end
+    return false
+end
+
+local function startFlightFov()
+    if otherFovModEnabled() then
+        fovEnabled = false
+        log("Flight FOV is OFF here: the AC8CockpitFOV mod is enabled and already controls it. To use this mod's FOV instead, disable that mod (rename its enabled.txt).")
+        return
+    end
+    loadSavedFov()
+    for class, list in pairs({ LiveCameraViewComponent = fovViews, LivePlayerCameraManager = fovManagers }) do
+        local ok, err = pcall(NotifyOnNewObject, "/Script/Live." .. class, function(object)
+            ExecuteInGameThread(function() try(remember, list, object) end)
+        end)
+        log("Watching /Script/Live.%-26s %s", class, ok and "ok" or ("FAILED: " .. tostring(err)))
+        ExecuteInGameThread(function()
+            for _, object in ipairs(FindAllOf(class) or {}) do try(remember, list, object) end
+        end)
+    end
+    local function tick()
+        if fovFailed then return end
+        local ok, err = pcall(fovFrame)
+        if not ok then
+            fovFailed = true
+            for _, entry in ipairs(fovManagers) do      -- never leave the game locked
+                pcall(function()
+                    if entry.object:IsValid() and entry.object.PCOwner:IsValid() and (entry.applied or 0) > 0 then
+                        entry.object.PCOwner:FOV(0)
+                    end
+                end)
+            end
+            log("FOV STOPPED (the cutscene fix keeps running): %s", tostring(err))
+        end
+    end
+    if LoopInGameThreadAfterFrames then
+        LoopInGameThreadAfterFrames(1, tick)
+    else
+        LoopAsync(16, function() ExecuteInGameThread(tick); return false end)
+    end
+end
+
+local function bumpFov(delta, reset)
+    if not fovEnabled then log("FOV keys: flight FOV is off (see above)"); return end
+    local mode = fovMode
+    if not mode then log("FOV keys: not in a flight view right now"); return end
+    local cur = fovValue[mode]
+    local new
+    if reset then new = 0
+    else
+        new = (cur > 0 and cur or FOV_BASE[mode]) + delta
+        new = math.max(30, math.min(120, new))
+    end
+    fovValue[mode] = new
+    saveFov()
+    if new > 0 then
+        log("FOV  %-11s -> %g (16:9 terms) = %.1f wide on screen (saved)", mode, new, onScreen(new))
+    else
+        log("FOV  %-11s -> game default (saved)", mode)
+    end
+end
+
 ------------------------------------------------------------------------
 -- wiring
 ------------------------------------------------------------------------
@@ -245,8 +428,19 @@ RegisterKeyBind(Key[cfg.ToggleKey or "F8"], function()
     end)
 end)
 
+RegisterKeyBind(Key[cfg.FOVUpKey or "PAGE_UP"], function()
+    ExecuteInGameThread(function() try(bumpFov, cfg.FOVStep or 2) end)
+end)
+RegisterKeyBind(Key[cfg.FOVDownKey or "PAGE_DOWN"], function()
+    ExecuteInGameThread(function() try(bumpFov, -(cfg.FOVStep or 2)) end)
+end)
+RegisterKeyBind(Key[cfg.FOVResetKey or "HOME"], function()
+    ExecuteInGameThread(function() try(bumpFov, 0, true) end)
+end)
+
 RegisterKeyBind(Key[cfg.DumpKey or "F7"], function()
     ExecuteInGameThread(function() try(snapshot, "F7") end)
 end)
 
-log("v0.8 loaded. %s = toggle, %s = snapshot", cfg.ToggleKey or "F8", cfg.DumpKey or "F7")
+try(startFlightFov)
+log("v0.15 loaded. %s = toggle, %s = snapshot, PageUp/PageDown = flight FOV of the current view, Home = reset", cfg.ToggleKey or "F8", cfg.DumpKey or "F7")
