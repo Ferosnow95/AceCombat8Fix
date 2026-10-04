@@ -64,9 +64,7 @@ ACE COMBAT 8 ships with Easy Anti-Cheat. UE4SS mods only load when EAC isn't run
 ## Known issues
 - **A locked FOV replaces the game's dynamic FOV** (speed and afterburner changes) in the views where you set one. Use `0` or Home to give it back.
 - The flight FOV is for offline play only: it does nothing when the world has a net driver.
-- It can't run together with the AC8CockpitFOV mod. The fix detects that mod and switches its own FOV off; disable one of them.
 - Pre-rendered videos (the online-mode MP4s) can't be widened.
-- Widening shows more of each scene than the directors framed, so occasionally you may see things at the frame edges they didn't plan for.
 - Developed and tested on one PC (32:9, 5120×1440). Reports from 21:9 and 48:9 (triple-screen) setups are welcome.
 
 ## Troubleshooting
