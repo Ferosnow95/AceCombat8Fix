@@ -63,6 +63,7 @@ ACE COMBAT 8 ships with Easy Anti-Cheat. UE4SS mods only load when EAC isn't run
 
 ## Known issues
 - **A locked FOV replaces the game's dynamic FOV** (speed and afterburner changes) in the views where you set one. Use `0` or Home to give it back.
+- **The FOV lock returns 1–3 seconds after each level start or return from a cutscene** (the flight FOV part deliberately stays hands-off while the game changes level). A v0.15 crash right after a mid-mission cutscene led to this; if the game still crashes for you, set `FlightFOV = false` in `Scripts\config.lua` and report it with the crash folder from `%LOCALAPPDATA%\BANDAI NAMCO Entertainment\ACE COMBAT 8\Saved\Crashes`.
 - The flight FOV is for offline play only: it does nothing when the world has a net driver.
 - Pre-rendered videos (the online-mode MP4s) can't be widened.
 - Developed and tested on one PC (32:9, 5120×1440). Reports from 21:9 and 48:9 (triple-screen) setups are welcome.

@@ -1,4 +1,4 @@
--- AC8 Ultrawide & FOV v0.15 - settings
+-- AC8 Ultrawide & FOV v0.16 - settings
 return {
     -- Master switch (F8 toggles at runtime and restores the game's original cap and FOV)
     Enabled = true,

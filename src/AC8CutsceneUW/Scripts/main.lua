@@ -1,5 +1,5 @@
 --[[
-    AC8 Ultrawide & FOV  v0.15  (UE4SS Lua, ACE COMBAT 8 / UE 5.4)
+    AC8 Ultrawide & FOV  v0.16  (UE4SS Lua, ACE COMBAT 8 / UE 5.4)
 
     What it does
     ------------
@@ -19,7 +19,7 @@
       * Never read the camera manager's view-target actor, and never read hooked function parameters
         other than the context object (both crashed this UE4SS build).
 
-    Flight FOV (v0.15)
+    Flight FOV (v0.15, hardened in v0.16)
     ------------------
     AC8 ignores writes to the plane's camera components (it caches their FOV at spawn), but the engine's
     PlayerController:FOV(deg) command locks the FINAL view FOV in PlayerCameraManager, and that wins at any
@@ -28,8 +28,10 @@
     (AC8 Three-View FOV), which proved it in this game; this module is an independent implementation.
     A locked FOV replaces the game's dynamic FOV in that view (value 0 gives it back). Offline only: the FOV
     lock is skipped when the world has a net driver (online).
-    Unlike the cutscene part, this part keeps object references between frames (purged every frame), which is
-    the pattern the AC8CockpitFOV mod runs with in this game on this UE4SS build.
+    Unlike the cutscene part, this part keeps object references between frames (purged every frame), the pattern
+    the AC8CockpitFOV mod runs with. v0.16: the lists are rebuilt from fresh FindAllOf scans (no NotifyOnNewObject),
+    cleared at every PlayerController:ClientRestart, and the loop stays hands-off for ~180 frames after it - v0.15
+    crashed (access violation in the frame loop) 50 ms after a mission start.
 
     Keys: F8 = toggle, F7 = snapshot, PageUp/PageDown = flight FOV of the current view, Home = reset it.
 ]]
@@ -228,6 +230,8 @@ local fovValue = {
 local fovEnabled = cfg.FlightFOV ~= false
 local fovMode = nil            -- current view name (plain string), maintained by the frame loop
 local fovFailed = false
+local fovHold, fovSeedIn = 0, 0   -- frames to stay hands-off after a level start / frames until the next fresh scan
+local FOV_HOLD_FRAMES, FOV_RESEED_FRAMES = 180, 60
 
 local function onScreen(fov16)   -- 16:9-equivalent horizontal FOV -> the same view on this screen (Hor+)
     if not screenAR then return fov16 end
@@ -255,12 +259,30 @@ local function saveFov()
 end
 
 local fovViews, fovManagers = {}, {}     -- live objects; touched only from the game-thread frame loop below
-local function remember(list, object)
-    if not object:IsValid() then return end
-    for _, entry in ipairs(list) do
-        if entry.object == object then return end
+-- Rebuild a list from a FRESH FindAllOf scan, keeping the entry (and its lock state) of objects we already know.
+-- Objects are no longer taken from NotifyOnNewObject (they fire while the object is still being built) and
+-- v0.15 crashed at a mission start (access violation, uncatchable by pcall); this is the suspected cause.
+local function reseedList(list, class)
+    local fresh = {}
+    for _, object in ipairs(FindAllOf(class) or {}) do
+        if object:IsValid() then
+            local keep
+            for _, entry in ipairs(list) do
+                if entry.object == object then keep = entry; break end
+            end
+            fresh[#fresh + 1] = keep or { object = object }
+        end
     end
-    list[#list + 1] = { object = object }
+    for i = #list, 1, -1 do list[i] = nil end
+    for i, entry in ipairs(fresh) do list[i] = entry end
+end
+
+-- a new level / respawn is starting: forget every stored object and stay hands-off for a while
+local function fovLevelStart()
+    for _, list in ipairs({ fovViews, fovManagers }) do
+        for i = #list, 1, -1 do list[i] = nil end
+    end
+    fovHold, fovSeedIn, fovMode = FOV_HOLD_FRAMES, 0, nil
 end
 
 local function camActive(cam)
@@ -333,18 +355,21 @@ local function startFlightFov()
         return
     end
     loadSavedFov()
-    for class, list in pairs({ LiveCameraViewComponent = fovViews, LivePlayerCameraManager = fovManagers }) do
-        local ok, err = pcall(NotifyOnNewObject, "/Script/Live." .. class, function(object)
-            ExecuteInGameThread(function() try(remember, list, object) end)
-        end)
-        log("Watching /Script/Live.%-26s %s", class, ok and "ok" or ("FAILED: " .. tostring(err)))
-        ExecuteInGameThread(function()
-            for _, object in ipairs(FindAllOf(class) or {}) do try(remember, list, object) end
-        end)
+    log("Flight FOV loop: fresh scan every %d frames, hands-off for %d frames after each level start", FOV_RESEED_FRAMES, FOV_HOLD_FRAMES)
+    local function step()
+        if fovHold > 0 then fovHold = fovHold - 1; return end
+        if fovSeedIn <= 0 then
+            reseedList(fovViews, "LiveCameraViewComponent")
+            reseedList(fovManagers, "LivePlayerCameraManager")
+            fovSeedIn = FOV_RESEED_FRAMES
+        else
+            fovSeedIn = fovSeedIn - 1
+        end
+        fovFrame()
     end
     local function tick()
         if fovFailed then return end
-        local ok, err = pcall(fovFrame)
+        local ok, err = pcall(step)
         if not ok then
             fovFailed = true
             for _, entry in ipairs(fovManagers) do      -- never leave the game locked
@@ -401,6 +426,7 @@ end
 local ok, err = pcall(RegisterHook, "/Script/Engine.PlayerController:ClientRestart", function(Context)
     local pc = try(function() return Context:get() end)
     if pc then detectAspect(pc) end
+    if fovEnabled then fovLevelStart() end
     if enabled then sweep(false, "player restart") end
     -- cameras spawned during the restart itself: one more fresh pass a moment later
     pcall(ExecuteWithDelay, 2000, function()
@@ -443,4 +469,4 @@ RegisterKeyBind(Key[cfg.DumpKey or "F7"], function()
 end)
 
 try(startFlightFov)
-log("v0.15 loaded. %s = toggle, %s = snapshot, PageUp/PageDown = flight FOV of the current view, Home = reset", cfg.ToggleKey or "F8", cfg.DumpKey or "F7")
+log("v0.16 loaded. %s = toggle, %s = snapshot, PageUp/PageDown = flight FOV of the current view, Home = reset", cfg.ToggleKey or "F8", cfg.DumpKey or "F7")

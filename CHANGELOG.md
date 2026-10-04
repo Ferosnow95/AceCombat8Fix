@@ -1,8 +1,15 @@
 # Changelog
 
-**v0.15 is the latest release.** v0.8 (cutscene/menu fix only) is also published. The other versions were internal test builds, and v0.11 is a superseded pre-release; they're listed because each one taught something about how AC8 handles its cameras.
+**v0.16 is the latest release.** v0.8 (cutscene/menu fix only) is also published. The other versions were internal test builds, and v0.11 is a superseded pre-release; they're listed because each one taught something about how AC8 handles its cameras.
 
-## v0.15 — 2026-10-04 (release)
+## v0.16 — 2026-10-04 (release)
+**Crash hardening for the flight FOV part. Same features as v0.15; the cutscene/menu fix is unchanged.**
+- **Why:** with v0.15 the game crashed once, 50 ms after gameplay resumed from a mid-mission cutscene (access violation on the game thread, inside the mod's per-frame FOV code, the same class of crash as the old v0.4–v0.7 builds). The exact object read is not known.
+- **Changed:** the FOV part no longer takes objects from `NotifyOnNewObject` (they fire while the object is still being built). It rebuilds its list of camera managers and views from a fresh `FindAllOf` scan once per second.
+- **Changed:** at every `PlayerController:ClientRestart` (level start, return from a cutscene, respawn) it forgets all stored objects and does nothing for about 180 frames. The FOV lock therefore comes back about 1–3 seconds after gameplay resumes.
+- If you still crash, set `FlightFOV = false` in `Scripts\config.lua`: that leaves only the cutscene/menu fix, which has not crashed. Crash reports are in `%LOCALAPPDATA%\BANDAI NAMCO Entertainment\ACE COMBAT 8\Saved\Crashes`.
+
+## v0.15 — 2026-10-04 (superseded by v0.16)
 **Cutscene/menu fix plus a working, live flight FOV.**
 - **New:** flight FOV for third-person, cockpit and HUD-only views (`ThirdPersonFOV`, `CockpitFOV`, `FirstPersonFOV`, in 16:9-equivalent degrees; `0` = the game's own). The mod widens them for your screen.
 - **New:** PageUp/PageDown change the FOV of the view you're in, live, with no respawn. Home gives the view back to the game. Values are saved to `AC8CutsceneUW_flightfov.txt`.
@@ -11,15 +18,15 @@
 - **New:** `IgnoreOtherFOVMod`: the FOV part switches itself off if the AC8CockpitFOV mod is enabled.
 - **Changed:** F8 also hands the FOV back to the game.
 - **Changed:** the cutscene part is unchanged from v0.8. The flight FOV part runs a cheap per-frame check and keeps its camera-manager and view objects (purged when destroyed); if it ever throws, it releases the FOV and stops itself.
-- Confirmed in-game on 32:9: the FOV changes live in all three views.
+- Confirmed in-game on 32:9: the FOV changes live in all three views. v0.15 then crashed once after a mid-mission cutscene, which led to v0.16.
 
 ## Internal FOV test builds (v0.9 – v0.14)
 None of these shipped. They tried to change the FOV by writing to the plane's cameras, which never worked reliably.
 
-- **v0.14** — Patched the third-person blueprint template again after its real value had loaded. Superseded by v0.15 before it was tested.
+- **v0.14** — Patched the third-person blueprint template again after its real value had loaded. Superseded by v0.15, then v0.16.
 - **v0.13** — Wrote the offset to each plane camera the moment it was created. Cockpit and HUD-only took the offset at spawn, but third-person did not: its camera reads 90° (the engine default) at creation and the game then loads its real value over the write.
 - **v0.12** — Live-FOV probes. `PlayerCameraManager.LockedFOV` isn't exposed to Lua in this build, and the afterburner FOV channel (`ABMaxAdditionFOV`, `AfterburnerFOVCurrent`) changed nothing. It also showed that v0.11 read the third-person template before the game finished loading it.
-- **v0.11** — Changed the plane's blueprint templates, with PageUp/PageDown. Cockpit and HUD-only worked at spawn; third-person did not. Published as a pre-release and superseded by v0.15.
+- **v0.11** — Changed the plane's blueprint templates, with PageUp/PageDown. Cockpit and HUD-only worked at spawn; third-person did not. Published as a pre-release and superseded by v0.16.
 - **v0.10** — Wrote `FieldOfView` on the live cameras. No effect on the picture, and the offset was applied twice (template, then the camera copied from it).
 - **v0.9** — Added FOV discovery. It found the flight camera classes on the player plane and showed that AC8's gameplay is already Hor+ (61.9° at 16:9 becomes about 100° on 32:9). Also found `LiveDebriefingCameraComponent`.
 
