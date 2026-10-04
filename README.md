@@ -105,15 +105,9 @@ ACE COMBAT 8 ships with Easy Anti-Cheat. UE4SS mods only load when EAC isn't run
 ## Troubleshooting
 The mod writes `AC8CutsceneUW.log` next to itself (the previous session is kept as `AC8CutsceneUW.prev.log`). Press F7 in the broken scene and attach the log to an issue. The log also records each FOV change and which flight view was detected.
 
-## Changelog
-See [CHANGELOG.md](CHANGELOG.md).
-
 ## License
 Distributed under the MIT License. See [LICENSE](LICENSE).
 
 ## External tools and credits
 - [RE-UE4SS](https://github.com/UE4SS-RE/RE-UE4SS) — the Lua scripting runtime this mod runs on.
-- [Lyall's ultrawide fixes](https://codeberg.org/Lyall) — the reference for Unreal ultrawide techniques (constrained aspect ratio and Hor+ FOV maths).
-- [PolarWizard/CodeVeinFix](https://github.com/PolarWizard/CodeVeinFix) — README format.
-- The AC8CockpitFOV mod (AC8 Three-View FOV) showed that `PlayerController:FOV` and the `LiveCameraViewComponent` cameras are the working way to set the FOV in this game. This mod's FOV code is an independent implementation of that technique.
 - Works alongside the [AC8 Ultrawide UI Fix](https://www.nexusmods.com/acecombat8wingsoftheve/mods/12) (HUD layout), which is a separate mod.
