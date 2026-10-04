@@ -1,4 +1,4 @@
-# ACE COMBAT 8: Wings of Theve — Ultrawide & FOV Fix
+# ACE COMBAT 8: Wings of Theve (Ultrawide & FOV Fix)
 
 [![Downloads](https://img.shields.io/github/downloads/Ferosnow95/AceCombat8Fix/total.svg)](https://github.com/Ferosnow95/AceCombat8Fix/releases)
 [![Latest release](https://img.shields.io/github/v/release/Ferosnow95/AceCombat8Fix)](https://github.com/Ferosnow95/AceCombat8Fix/releases)
